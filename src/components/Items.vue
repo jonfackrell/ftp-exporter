@@ -418,6 +418,23 @@
           <div class="mt-2 space-y-6 sm:space-y-5">
             <div>
               <h3 class="text-lg leading-6 font-medium text-gray-900">
+                From the Page
+              </h3>
+            </div>
+            <div class="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:border-b-2 sm:py-5">
+              <label for="first_name" class="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">
+                IIIF API URL
+              </label>
+              <div class="mt-1 sm:mt-0 sm:col-span-2">
+                <input v-model="ftp_url"
+                       type="text" name="ftp_url" id="ftp_url" 
+                       class="max-w-lg block w-full shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:max-w-xs sm:text-sm border-gray-300 rounded-md">
+              </div>
+            </div>
+          </div>
+          <div class="mt-2 space-y-6 sm:space-y-5">
+            <div>
+              <h3 class="text-lg leading-6 font-medium text-gray-900">
                 Omeka
               </h3>
               <p class="mt-1 max-w-2xl text-sm text-gray-500">
@@ -519,24 +536,27 @@ export default {
 
     ipcRenderer.on('updateSettings', async (event, settings) => {      
       this.settings = settings || {};  
+      if(! Object.prototype.hasOwnProperty.call(this.settings, 'collections') || this.settings.collections.length < 1){
+        this.showSettings = true;
+      }else{
+        axios
+          .get('https://fromthepage.com/iiif/collection/970')
+          .then(response => {
+            this.collection = {
+                    '@id': response.data['@id'], 
+                    'label': response.data.label
+                }
+            this.allItems = response.data.manifests;
+            this.items = this.allItems;
+            ipcRenderer.send('sync', this.allItems); 
+          });
+      }
     });
        
     ipcRenderer.on('downloadComplete', async (event, data) => {      
       console.log(data.message);  
-    });
+    });   
     
-    
-    axios
-    .get('https://fromthepage.com/iiif/collection/970')
-    .then(response => {
-      this.collection = {
-              '@id': response.data['@id'], 
-              'label': response.data.label
-          }
-      this.allItems = response.data.manifests;
-      this.items = this.allItems;
-      ipcRenderer.send('sync', this.allItems); 
-    });
   },
 
   methods: {

@@ -6,6 +6,9 @@ import installExtension, { VUEJS_DEVTOOLS } from 'electron-devtools-installer'
 const isDevelopment = process.env.NODE_ENV !== 'production'
 
 import { autoUpdater } from "electron-updater"
+import * as Sentry from "@sentry/electron";
+
+Sentry.init({ dsn: "https://44ff7db8ac8d44108835af6330bcb86d@o513378.ingest.sentry.io/5615143" });
 
 import { ipcMain } from 'electron'
 import { dialog } from 'electron'
