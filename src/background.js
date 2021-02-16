@@ -1,6 +1,6 @@
 'use strict'
 
-import { app, protocol, BrowserWindow } from 'electron'
+import { app, protocol, BrowserWindow, Menu } from 'electron'
 import { createProtocol } from 'vue-cli-plugin-electron-builder/lib'
 import installExtension, { VUEJS_DEVTOOLS } from 'electron-devtools-installer'
 const isDevelopment = process.env.NODE_ENV !== 'production'
@@ -70,6 +70,15 @@ async function createWindow() {
   
 }
 
+function createMenu() {
+  const menuTemplate = [
+    { role: 'fileMenu' }
+  ]
+
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  Menu.setApplicationMenu(menu);
+}
+
 // Quit when all windows are closed.
 app.on('window-all-closed', () => {
   // On macOS it is common for applications and their menu bar
@@ -98,7 +107,7 @@ app.on('ready', async () => {
     }
   }
   createWindow()
-
+  createMenu()
 })
 
 // Exit cleanly on request from parent process in development mode.
