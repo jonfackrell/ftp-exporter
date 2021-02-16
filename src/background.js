@@ -29,6 +29,8 @@ const createCsvWriter = require('csv-writer').createObjectCsvWriter; // https://
 const Store = require('electron-store');
 const store = new Store();
 
+let currentCollection = null;
+
 // Scheme must be registered before the app is ready
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { secure: true, standard: true } }
@@ -44,10 +46,13 @@ async function createWindow() {
       // Use pluginOptions.nodeIntegration, leave this alone
       // See nklayman.github.io/vue-cli-plugin-electron-builder/guide/security.html#node-integration for more info
       // nodeIntegration: process.env.ELECTRON_NODE_INTEGRATION
-      nodeIntegration: true
+      nodeIntegration: true,
+      webSecurity: false
     }
   }).webContents.on('did-finish-load', () => {
-    win.webContents.send('updateFolders', store.get('woodruffpapers.folders'));
+    if(currentCollection){
+      win.webContents.send('updateFolders', store.get(currentCollection.key+'.folders'));
+    }    
     win.webContents.send('updateSettings', store.get('settings'));
   });
 
@@ -111,53 +116,75 @@ if (isDevelopment) {
   }
 }
 
-ipcMain.on('saveSettings', (event, data) => {
+ipcMain.on('saveSettings', (event, data) => {  
   store.set('settings', data);
 });
 
-ipcMain.on('createNewFolder', (event, folderName) => {
-  if(! store.has('woodruffpapers.folders')){
-    store.set('woodruffpapers.folders', {});
+ipcMain.on('setCurrentCollection', (event, collection) => {
+  //let collections = store.get('settings.collections');
+  //currentCollection = collections.filter(collection => { return collection['@id'] == id; })[0];
+  currentCollection = collection;
+});
+
+ipcMain.on('addCollection', (event, data) => {
+  let collections = store.get('settings.collections', []);
+  let index = collections.findIndex(collection => { return collection.ftp['@id'] == data.ftp['@id']; });
+  data.ftp['@id'] = data.ftp['@id'].replace(/\/+$/, '');
+  data.omeka.url = data.omeka.url.replace(/\/+$/, '');
+  if(index >= 0){
+    data.key = collections[index].key;    
+    collections[index] = data;
+  }else{
+    data.key = stringToSlug(data.ftp.label);
+    collections.push(data);
   }
-  let folders = store.get('woodruffpapers.folders');
+  store.set('settings.collections', collections);
+  currentCollection = data;
+  win.webContents.send('updateFolders', store.get(currentCollection.key+'.folders', {}));
+});
+
+ipcMain.on('createNewFolder', (event, folderName) => {
+  if(! store.has(currentCollection.key+'.folders')){
+    store.set(currentCollection.key+'.folders', {});
+  }
+  let folders = store.get(currentCollection.key+'.folders', {});
   folders[folderName] = ({
     'name': folderName, 'manifests': []
   });
-  store.set('woodruffpapers.folders', folders);
-  event.sender.webContents.send('updateFolders', store.get('woodruffpapers.folders'));
+  store.set(currentCollection.key+'.folders', folders);
+  event.sender.webContents.send('updateFolders', store.get(currentCollection.key+'.folders'));
 });
 
 ipcMain.on('addItemsToFolder', (event, folderName, manifests) => {  
-  let folder = store.get('woodruffpapers.folders.'+folderName);
+  let folder = store.get(currentCollection.key+'.folders.'+folderName);
   folder.manifests = folder.manifests.concat(manifests).filter(onlyUnique);
-  store.set('woodruffpapers.folders.'+folderName, folder);
-  event.sender.webContents.send('updateFolders', store.get('woodruffpapers.folders'));
+  store.set(currentCollection.key+'.folders.'+folderName, folder);
+  event.sender.webContents.send('updateFolders', store.get(currentCollection.key+'.folders'));
 });
 
 ipcMain.on('removeItemsFromFolder', (event, folderName, manifests) => {  
-  let folder = store.get('woodruffpapers.folders.'+folderName);
+  let folder = store.get(currentCollection.key+'.folders.'+folderName);
   manifests.forEach(manifest => {
     folder.manifests.splice(folder.manifests.indexOf(manifest), 1);
   });  
-  store.set('woodruffpapers.folders.'+folderName, folder);
-  event.sender.webContents.send('updateFolders', store.get('woodruffpapers.folders'));
+  store.set(currentCollection.key+'.folders.'+folderName, folder);
+  event.sender.webContents.send('updateFolders', store.get(currentCollection.key+'.folders'));
 });
 
 ipcMain.on('update', (event, manifests) => {
   manifests.forEach(manifest => {
     axios
       .get(manifest)
-      .then(response => {
-        const within = getCollectionKey(response.data.within['@id']);
+      .then(response => {        
         const id = getManifestKey(response.data['@id']);
-        store.set(within+'.manifests.'+id , response.data);
-        console.log(store.get(within+'.manifests'));
+        store.set(currentCollection.key+'.manifests.'+id , response.data);
+        console.log(store.get(currentCollection.key+'.manifests'));
       });
   });
 });
 
 ipcMain.on('export', (event, manifestUrls, imagesOnly) => {
-  const manifests = manifestUrls.map( m => { return store.get('woodruffpapers.manifests.'+getManifestKey(m))});
+  const manifests = manifestUrls.map( m => { return store.get(currentCollection.key+'.manifests.'+getManifestKey(m))});
 
   if(imagesOnly){
     exportImages(manifests);
@@ -239,7 +266,7 @@ ipcMain.on('createOmekaPages', (event) => {
           // Add to navigation based on topic 
           let pages = [];
           axios
-            .get('http://omeka.local/api/site_pages?per_page=10000')
+            .get(currentCollection.omeka.url + '/api/site_pages?per_page=10000')
             .then(response => {
               let currentPages = response.data.map(page => { return page['o:slug']; });              
               filteredSubjects.forEach(subject => {                
@@ -253,7 +280,7 @@ ipcMain.on('createOmekaPages', (event) => {
               Promise
                 .all(pages.map(page => { 
                   return api
-                            .post('http://omeka.local/api/site_pages?key_identity='+ store.get('settings.omeka.key_identity') +'&key_credential=' + store.get('settings.omeka.key_credential'), getPageJson(page['Title'])) 
+                            .post(currentCollection.omeka.url + '/api/site_pages?key_identity='+ currentCollection.omeka.key_identity +'&key_credential=' + currentCollection.omeka.key_credential, getPageJson(page['Title'])) 
                             .catch(function (error) {
                               console.log('Page Creation Error: ');
                               console.log(error);
@@ -271,13 +298,13 @@ ipcMain.on('createOmekaPages', (event) => {
                 pageManager.detach();
 
                   axios
-                    .get('http://omeka.local/api/sites/1') 
+                    .get(currentCollection.omeka.url + '/api/sites/'+currentCollection.omeka.site_id) 
                     .then(response => {
                       let site = response.data;
                       let documentsNavIndex = site['o:navigation'].findIndex(page => { return page.type == 'browseItemSets'; });
                       console.log(documentsNavIndex);
-                      let peopleIndex = site['o:navigation'][documentsNavIndex].links.findIndex(page => { return page.data.id == 3; });
-                      let placesIndex = site['o:navigation'][documentsNavIndex].links.findIndex(page => { return page.data.id == 4; });
+                      let peopleIndex = site['o:navigation'][documentsNavIndex].links.findIndex(page => { return page.data.id == 6; });
+                      let placesIndex = site['o:navigation'][documentsNavIndex].links.findIndex(page => { return page.data.id == 7; });
 
                       // TODO: Not adding new pages to navigation
                       newPages.forEach(page => {
@@ -297,7 +324,7 @@ ipcMain.on('createOmekaPages', (event) => {
                       console.log(site['o:navigation'][documentsNavIndex].links[peopleIndex]);
 
                       axios
-                        .put('http://omeka.local/api/sites/1?key_identity='+ store.get('settings.omeka.key_identity') +'&key_credential=' + store.get('settings.omeka.key_credential'), site) 
+                        .put(currentCollection.omeka.url + '/api/sites/'+ currentCollection.omeka.site_id +'?key_identity='+ currentCollection.omeka.key_identity +'&key_credential=' + currentCollection.omeka.key_credential, site) 
                         .catch(function (error) {
                           console.log(error);
                         });
@@ -316,12 +343,12 @@ ipcMain.on('createOmekaPages', (event) => {
 });
 
 ipcMain.on('sync', (event, remoteManifests) => {  
-  let localManifests = store.get('woodruffpapers.manifests');
+  let localManifests = store.get(currentCollection.key+'.manifests', []);
   // Remove local manifests that are missing in remote
-  if(store.has('woodruffpapers.manifests')){    
+  if(store.has(currentCollection.key+'.manifests')){    
     for (const [key, manifest] of Object.entries(localManifests)) {
       if(remoteManifests.map( m => { return m['@id']}).indexOf(manifest['@id']) < 0 ){
-        store.delete('woodruffpapers.manifests.'+getManifestKey(manifest['@id']));
+        store.delete(currentCollection.key+'.manifests.'+getManifestKey(manifest['@id']));
         console.log('Removing: '+ getManifestKey(manifest['@id']));
       }
     }
@@ -329,7 +356,7 @@ ipcMain.on('sync', (event, remoteManifests) => {
   
   // Add missing manifests to local from remote 
   let wait = 0;
-  localManifests = store.get('woodruffpapers.manifests');
+  localManifests = store.get(currentCollection.key+'.manifests', []);
   remoteManifests.forEach( (manifest, key) => {
     if(! localManifests.hasOwnProperty(getManifestKey(manifest['@id']))){
       wait ++;
@@ -337,7 +364,7 @@ ipcMain.on('sync', (event, remoteManifests) => {
         axios
         .get(manifest['@id'])
         .then(response => {        
-          store.set(getCollectionKey(response.data.within['@id'])+'.manifests.'+getManifestKey(response.data['@id']) , response.data);  
+          store.set(currentCollection.key+'.manifests.'+getManifestKey(response.data['@id']) , response.data);  
           console.log('Adding: '+ getManifestKey(response.data['@id']));      
         });
       }, 500 * wait); 
@@ -549,9 +576,9 @@ function extractSubjects(html){
   return subjects.join("||");
 }
 
-function getCollectionKey(url) {
+/* function getCollectionKey(url) {
   return url.split("/")[(url.split("/").length - 1)];
-}
+} */
 
 function getManifestKey(url) {
   return url.split("/")[(url.split("/").length - 2)];
@@ -623,7 +650,7 @@ function getPageJson(name){
               "o:data": {
                   "resource_type": "media",
                   "query": "?property%5B0%5D%5Bjoiner%5D=and&property%5B0%5D%5Bproperty%5D=3&property%5B0%5D%5Btype%5D=in&property%5B0%5D%5Btext%5D=" +name,
-                  "limit": "12",
+                  "limit": "50",
                   "heading": "",
                   "link-text": "Browse all"
               },
@@ -631,8 +658,8 @@ function getPageJson(name){
           }
       ],
       "o:site": {
-          "@id": "http://omeka.local/api/sites/" + 1,
-          "o:id": 1
+          "@id": currentCollection.omeka.url + "/api/sites/" + currentCollection.omeka.site_id,
+          "o:id": currentCollection.omeka.site_id
       }
   }
 }

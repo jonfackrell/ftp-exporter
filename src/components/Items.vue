@@ -164,7 +164,7 @@
       <div class="border-b border-gray-200 px-4 py-4 sm:flex sm:items-center sm:justify-between sm:px-6 lg:px-8">
         <div class="flex-1 min-w-0">
           <h1 class="text-lg font-medium leading-6 text-gray-900 sm:truncate">
-            {{ collection.label }}
+            {{ collection.ftp.label }}
           </h1>
         </div>
         <div class="mt-4 flex sm:mt-0 sm:ml-4">      
@@ -426,7 +426,7 @@
                 IIIF API URL
               </label>
               <div class="mt-1 sm:mt-0 sm:col-span-2">
-                <input v-model="ftp_url"
+                <input v-model="newCollection.ftp['@id']"
                        type="text" name="ftp_url" id="ftp_url" 
                        class="max-w-lg block w-full shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:max-w-xs sm:text-sm border-gray-300 rounded-md">
               </div>
@@ -437,8 +437,19 @@
               <h3 class="text-lg leading-6 font-medium text-gray-900">
                 Omeka
               </h3>
-              <p class="mt-1 max-w-2xl text-sm text-gray-500">
-                <a v-on:click="openExternalLink('https://documents.wilfordwoodruffpapers.org/admin/user')"
+              <div class="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:pt-5">
+                <label for="first_name" class="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">
+                  URL
+                </label>
+                <div class="mt-1 sm:mt-0 sm:col-span-2">
+                  <input v-model="newCollection.omeka.url"
+                        type="text" name="omeka_url" id="omeka_url" 
+                        class="max-w-lg block w-full shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:max-w-xs sm:text-sm border-gray-300 rounded-md">
+                </div>
+              </div>              
+              <p v-show="newCollection.omeka.url"
+                 class="mt-1 max-w-2xl text-sm text-gray-500">              
+                <a v-on:click="openExternalLink(apiUrl)"
                    href="#"
                    class="text-indigo-800 hover:text-indigo-600 hover:underline"
                    >
@@ -446,12 +457,26 @@
                 </a>
               </p>
             </div>
+            <div v-show="newCollection.omeka.url"
+                  class="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">              
+              <label for="location" class="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">Site</label>
+              <div class="mt-1 sm:mt-0 sm:col-span-2">
+                <select v-model="newCollection.omeka.site_id"
+                        id="site_id" 
+                        name="site_id" 
+                        class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                  <option v-for="site in sites" v-bind:value="site.id" v-bind:key="site.id">
+                    {{ site.title }}
+                  </option>
+                </select>
+              </div>              
+            </div>
             <div class="sm:grid sm:grid-cols-3 sm:gap-4 sm:items-start sm:border-t sm:border-gray-200 sm:pt-5">
               <label for="first_name" class="block text-sm font-medium text-gray-700 sm:mt-px sm:pt-2">
                 Key Indentity
               </label>
               <div class="mt-1 sm:mt-0 sm:col-span-2">
-                <input v-model="settings.omeka.key_identity"
+                <input v-model="newCollection.omeka.key_identity"
                        type="text" name="key_identity" id="key_identity" 
                        class="max-w-lg block w-full shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:max-w-xs sm:text-sm border-gray-300 rounded-md">
               </div>
@@ -461,7 +486,7 @@
                 Key Credential
               </label>
               <div class="mt-1 sm:mt-0 sm:col-span-2">
-                <input v-model="settings.omeka.key_credential"
+                <input v-model="newCollection.omeka.key_credential"
                        type="text" name="key_credential" id="key_credential" 
                        class="max-w-lg block w-full shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:max-w-xs sm:text-sm border-gray-300 rounded-md">
               </div>
@@ -501,11 +526,32 @@ export default {
   data () {
     return {
       showSettings: false,
-      settings: {
+      newCollection: {
+        ftp: {
+          '@id': null,
+          label: null,
+        },
         omeka: {
-          key_identity: '',
-          key_credential: ''
+          url: '',
+          site_id: null,
+          key_identity: null,
+          key_credential: null
         }
+      },
+      collection: {
+        ftp: {
+          '@id': null,
+          label: null,
+        },
+        omeka: {
+          url: null,
+          site_id: null,
+          key_identity: null,
+          key_credential: null
+        }
+      },
+      settings: {   
+        collections: []
       },
       key_identity: '',
       key_credential: '',
@@ -513,19 +559,31 @@ export default {
       activeFolder: null,
       showAddFolder: false,
       newFolderName: '',
-      collection: {},
       allItems: [],
       items: [],    
       selected: [],
       completed: false,
       q: null,
       activeItem: {},
-      folders: []
+      folders: [],
+      sites: []
     }
   },
   watch: {
     q(){
       this.activeFolder = null;
+    },
+    collection: {
+      handler(data){
+        if(data.omeka.url !== null){
+          axios
+            .get(data.omeka.url.replace(/\/+$/, '') + '/api/sites')
+            .then(response => {
+              this.sites = response.data.map(site => { return {id: site['o:id'], title: site['o:title']};}); 
+            });
+        }
+      },
+      deep: true
     }
   },
   mounted () { 
@@ -534,18 +592,16 @@ export default {
       this.folders = folders || {};  
     });
 
-    ipcRenderer.on('updateSettings', async (event, settings) => {      
+    ipcRenderer.on('updateSettings', async (event, settings) => {   
       this.settings = settings || {};  
-      if(! Object.prototype.hasOwnProperty.call(this.settings, 'collections') || this.settings.collections.length < 1){
+      if((! Object.prototype.hasOwnProperty.call(this.settings, 'collections')) || (this.settings.collections.length < 1)){
         this.showSettings = true;
       }else{
+        this.collection = this.settings.collections[0];
+        ipcRenderer.send('setCurrentCollection', this.collection);        
         axios
-          .get('https://fromthepage.com/iiif/collection/970')
+          .get(this.collection.ftp['@id'])
           .then(response => {
-            this.collection = {
-                    '@id': response.data['@id'], 
-                    'label': response.data.label
-                }
             this.allItems = response.data.manifests;
             this.items = this.allItems;
             ipcRenderer.send('sync', this.allItems); 
@@ -557,6 +613,12 @@ export default {
       console.log(data.message);  
     });   
     
+  },
+
+  computed: {
+    apiUrl: function() {
+      return this.collection.omeka.url.replace(/\/+$/, '') + '/admin/user';
+    }
   },
 
   methods: {
@@ -634,13 +696,18 @@ export default {
         ipcRenderer.send('createOmekaPages');
       },      
       saveSettings: function(){
-        ipcRenderer.send('saveSettings', {
-            'omeka': {
-              'key_identity': this.settings.omeka.key_identity, 
-              'key_credential': this.settings.omeka.key_credential
-            }            
-          });
-        this.showSettings = false;    
+        //ipcRenderer.send('saveSettings', newCollection);
+        this.showSettings = false;  
+        axios
+          .get(this.newCollection.ftp['@id'])
+          .then(response => {
+            this.newCollection.ftp.label = response.data.label
+            this.collection = this.newCollection;
+            this.allItems = response.data.manifests;
+            this.items = this.allItems;
+            ipcRenderer.send('addCollection', this.newCollection);
+            ipcRenderer.send('sync', this.allItems);  
+          });  
       }
   }
 }
